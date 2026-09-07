@@ -15,6 +15,7 @@ import { fibonacciSphere, gaussian, latLonToVec3, makeRng, type Rng } from './ma
 import { geography } from '../data/profile'
 
 export const SHAPE_IDS = [
+  // 0-7 map one-to-one onto the eight journey stages
   'cloud',
   'tokens',
   'portrait',
@@ -23,6 +24,12 @@ export const SHAPE_IDS = [
   'candles',
   'globe',
   'name',
+  // 8+ are per-project worlds for the evaluate stage. The stage borrows one of
+  // these in place of its own shape depending on which project is selected.
+  'gifting',
+  'funnel',
+  'trees',
+  'waveform',
 ] as const
 
 export type ShapeId = (typeof SHAPE_IDS)[number]
@@ -651,6 +658,313 @@ const name: Builder = (count, out, rng) => {
 
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Per-project worlds. These are never reached by scrolling alone — the evaluate
+// stage swaps its own shape for one of these depending on which project the
+// visitor has selected, so switching project physically rebuilds the cloud.
+// ---------------------------------------------------------------------------
+
+/** A point somewhere on one of a cube's twelve edges. */
+function boxEdgePoint(S: number, rng: Rng): [number, number, number] {
+  const axis = (rng() * 3) | 0
+  const s1 = rng() < 0.5 ? -S : S
+  const s2 = rng() < 0.5 ? -S : S
+  const t = (rng() * 2 - 1) * S
+  if (axis === 0) return [t, s1, s2]
+  if (axis === 1) return [s1, t, s2]
+  return [s1, s2, t]
+}
+
+/** A point somewhere on a cube's surface. */
+function boxFacePoint(S: number, rng: Rng): [number, number, number] {
+  const face = (rng() * 6) | 0
+  const a = (rng() * 2 - 1) * S
+  const b = (rng() * 2 - 1) * S
+  switch (face) {
+    case 0:
+      return [S, a, b]
+    case 1:
+      return [-S, a, b]
+    case 2:
+      return [a, S, b]
+    case 3:
+      return [a, -S, b]
+    case 4:
+      return [a, b, S]
+    default:
+      return [a, b, -S]
+  }
+}
+
+// 8 — gifting: Giftlips. A wrapped gift box with cards orbiting it.
+
+const gifting: Builder = (count, out, rng) => {
+  const S = 3.1
+  const RIBBON = 0.5
+
+  for (let i = 0; i < count; i++) {
+    const o = i * 4
+    const roll = rng()
+
+    if (roll < 0.13) {
+      // gift cards orbiting the box, each facing inward
+      const a = rng() * Math.PI * 2
+      const r = 5.8 + rng() * 3
+      const u = (rng() - 0.5) * 1.7
+      const v = (rng() - 0.5) * 1.1
+      const nx = Math.cos(a)
+      const nz = Math.sin(a)
+      out[o] = nx * r - nz * u
+      out[o + 1] = (rng() - 0.5) * 7.5 + v
+      out[o + 2] = nz * r + nx * u
+      out[o + 3] = 0.5
+      continue
+    }
+
+    if (roll < 0.2) {
+      // the bow: two loops sitting on the lid
+      const side = rng() < 0.5 ? -1 : 1
+      const a = rng() * Math.PI * 2
+      out[o] = side * 1.05 + Math.cos(a) * 1.05 * side
+      out[o + 1] = S + 0.95 + Math.sin(a) * 0.72
+      out[o + 2] = (rng() - 0.5) * 0.4
+      out[o + 3] = 1
+      continue
+    }
+
+    if (roll < 0.48) {
+      // ribbon: two bands wrapping the box, sampled by rejection
+      let p: [number, number, number] = [0, 0, 0]
+      let ok = false
+      for (let tries = 0; tries < 12 && !ok; tries++) {
+        p = boxFacePoint(S, rng)
+        ok = Math.abs(p[0]) < RIBBON || Math.abs(p[2]) < RIBBON
+      }
+      out[o] = p[0]
+      out[o + 1] = p[1]
+      out[o + 2] = p[2]
+      out[o + 3] = 1
+      continue
+    }
+
+    if (roll < 0.82) {
+      const [x, y, z] = boxEdgePoint(S, rng)
+      out[o] = x
+      out[o + 1] = y
+      out[o + 2] = z
+      out[o + 3] = 0.55
+      continue
+    }
+
+    // faint wrapping-paper fill so the box reads as solid
+    const [x, y, z] = boxFacePoint(S, rng)
+    out[o] = x
+    out[o + 1] = y
+    out[o + 2] = z
+    out[o + 3] = 0.06
+  }
+}
+
+// 9 — funnel: FunnelCockpit. A conversion funnel plus blocks being dragged in.
+
+const funnel: Builder = (count, out, rng) => {
+  const TIERS = [
+    { w: 8.4, y: 3.9 },
+    { w: 6.4, y: 1.4 },
+    { w: 4.5, y: -1.1 },
+    { w: 2.7, y: -3.6 },
+  ]
+  const H = 1.45
+  const D = 2.0
+
+  for (let i = 0; i < count; i++) {
+    const o = i * 4
+    const roll = rng()
+
+    if (roll < 0.12) {
+      // page blocks waiting off to the side, mid drag-and-drop
+      const slot = (rng() * 3) | 0
+      const bx = 7.2 + (slot % 2) * 0.4
+      const by = 3.2 - slot * 2.4
+      const bw = 2.2
+      const bh = 1.2
+      const edge = rng() < 0.55
+      let u: number
+      let v: number
+      if (edge) {
+        const perim = 2 * (bw + bh)
+        let t = rng() * perim
+        if (t < bw) {
+          u = t - bw / 2
+          v = bh / 2
+        } else if ((t -= bw) < bh) {
+          u = bw / 2
+          v = bh / 2 - t
+        } else if ((t -= bh) < bw) {
+          u = bw / 2 - t
+          v = -bh / 2
+        } else {
+          t -= bh
+          u = -bw / 2
+          v = t - bh / 2
+        }
+      } else {
+        u = (rng() - 0.5) * bw * 0.82
+        v = (rng() - 0.5) * bh * 0.5
+      }
+      out[o] = bx + u
+      out[o + 1] = by + v
+      out[o + 2] = (rng() - 0.5) * 0.5
+      out[o + 3] = edge ? 1 : 0.1
+      continue
+    }
+
+    if (roll < 0.24) {
+      // traffic falling through the funnel, narrowing as it descends
+      const t = rng()
+      const y = TIERS[0].y + H / 2 - t * (TIERS[0].y - TIERS[3].y + H)
+      const wAt = TIERS[0].w * (1 - t) + TIERS[3].w * t
+      out[o] = (rng() - 0.5) * wAt * 0.55
+      out[o + 1] = y
+      out[o + 2] = (rng() - 0.5) * D * 0.5
+      out[o + 3] = 1
+      continue
+    }
+
+    if (roll < 0.36) {
+      // sloped shoulders joining one tier to the next
+      const k = (rng() * (TIERS.length - 1)) | 0
+      const t = rng()
+      const side = rng() < 0.5 ? -1 : 1
+      const x0 = (side * TIERS[k].w) / 2
+      const x1 = (side * TIERS[k + 1].w) / 2
+      out[o] = x0 + (x1 - x0) * t
+      out[o + 1] = TIERS[k].y - H / 2 - t * (TIERS[k].y - H / 2 - (TIERS[k + 1].y + H / 2))
+      out[o + 2] = (rng() - 0.5) * D
+      out[o + 3] = 0.5
+      continue
+    }
+
+    // the tiers themselves — rims bright, bodies faint
+    const tier = TIERS[(rng() * TIERS.length) | 0]
+    const rim = rng() < 0.45
+    if (rim) {
+      const top = rng() < 0.5
+      out[o] = (rng() - 0.5) * tier.w
+      out[o + 1] = tier.y + (top ? H / 2 : -H / 2)
+      out[o + 2] = (rng() - 0.5) * D
+      out[o + 3] = 1
+    } else {
+      out[o] = (rng() - 0.5) * tier.w
+      out[o + 1] = tier.y + (rng() - 0.5) * H
+      out[o + 2] = (rng() - 0.5) * D
+      out[o + 3] = 0.09
+    }
+  }
+}
+
+// 10 — trees: the XGBoost dashboard. Three boosted decision trees.
+
+const trees: Builder = (count, out, rng) => {
+  type Node = { x: number; y: number; z: number; leaf: boolean }
+  const nodes: Node[] = []
+  const edges: [Node, Node][] = []
+
+  const DEPTH = 3
+  const build = (x: number, y: number, z: number, spread: number, d: number): Node => {
+    const node: Node = { x, y, z, leaf: d === DEPTH }
+    nodes.push(node)
+    if (d < DEPTH) {
+      for (const side of [-1, 1]) {
+        const child = build(x + side * spread, y - 2.1, z, spread * 0.52, d + 1)
+        edges.push([node, child])
+      }
+    }
+    return node
+  }
+
+  for (const [rootX, rootZ] of [
+    [-5.7, -0.9],
+    [0, 0.6],
+    [5.7, -0.9],
+  ]) {
+    build(rootX, 3.7, rootZ, 2.5, 0)
+  }
+
+  if (!nodes.length || !edges.length) return sphereFallback(count, out, rng)
+
+  for (let i = 0; i < count; i++) {
+    const o = i * 4
+    if (rng() < 0.45) {
+      const n = nodes[(rng() * nodes.length) | 0]
+      const s = n.leaf ? 0.22 : 0.34
+      out[o] = n.x + gaussian(rng) * s
+      out[o + 1] = n.y + gaussian(rng) * s
+      out[o + 2] = n.z + gaussian(rng) * s
+      out[o + 3] = n.leaf ? 1 : 0.5
+    } else {
+      const [a, b] = edges[(rng() * edges.length) | 0]
+      const t = rng()
+      out[o] = a.x + (b.x - a.x) * t + gaussian(rng) * 0.04
+      out[o + 1] = a.y + (b.y - a.y) * t
+      out[o + 2] = a.z + (b.z - a.z) * t + gaussian(rng) * 0.04
+      out[o + 3] = 0.09
+    }
+  }
+}
+
+// 11 — waveform: Seed-VC and Seed Dance. A voice, and the rings it radiates.
+
+const waveform: Builder = (count, out, rng) => {
+  const SPAN = 17
+  const BARS = 104
+
+  // a speech-like envelope: syllable bursts under a slow overall shape
+  const amplitude = (k: number) => {
+    const u = k / (BARS - 1)
+    const syllables =
+      0.55 + 0.45 * Math.sin(u * 34) * Math.sin(u * 11.3) + 0.25 * Math.sin(u * 61.7)
+    const envelope = Math.sin(u * Math.PI) ** 0.6
+    return Math.max(0.06, Math.abs(syllables) * envelope) * 3.6
+  }
+
+  for (let i = 0; i < count; i++) {
+    const o = i * 4
+    const roll = rng()
+
+    if (roll < 0.16) {
+      // concentric rings radiating from the source, tilted into depth
+      const ring = 1 + ((rng() * 4) | 0)
+      const r = ring * 1.85
+      const a = rng() * Math.PI * 2
+      out[o] = Math.cos(a) * r * 1.15
+      out[o + 1] = Math.sin(a) * r * 0.75
+      out[o + 2] = -3.2 - ring * 0.5
+      out[o + 3] = 0.45
+      continue
+    }
+
+    if (roll < 0.22) {
+      // the centre line the waveform is mirrored around
+      out[o] = (rng() - 0.5) * SPAN
+      out[o + 1] = gaussian(rng) * 0.04
+      out[o + 2] = (rng() - 0.5) * 0.3
+      out[o + 3] = 1
+      continue
+    }
+
+    const k = (rng() * BARS) | 0
+    const amp = amplitude(k)
+    const x = -SPAN / 2 + (k / (BARS - 1)) * SPAN
+    // sample along the bar, denser at its tips so peaks read
+    const t = Math.pow(rng(), 0.75)
+    out[o] = x + (rng() - 0.5) * 0.055
+    out[o + 1] = (rng() < 0.5 ? -1 : 1) * t * amp
+    out[o + 2] = (rng() - 0.5) * 0.55
+    out[o + 3] = t > 0.82 ? 1 : 0.16
+  }
+}
+
 const BUILDERS: Record<ShapeId, Builder> = {
   cloud,
   tokens,
@@ -660,6 +974,10 @@ const BUILDERS: Record<ShapeId, Builder> = {
   candles,
   globe,
   name,
+  gifting,
+  funnel,
+  trees,
+  waveform,
 }
 
 /**
