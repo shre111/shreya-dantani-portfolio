@@ -95,9 +95,13 @@ Spectacle is the default, but it is never the only way through:
 
 ## Deploying
 
-The build is fully static and `vite.config.ts` sets `base: './'`, so `dist/` works from any path — a GitHub Pages project site included.
+Live at **https://shre111.github.io/**.
 
-For GitHub Pages, publish `dist/` to the `gh-pages` branch (or point Pages at it via Actions). One thing to update after choosing a host: the `canonical` link and the JSON-LD `url` in `index.html` both point at `https://shre111.github.io/portfolio/`.
+Every push to `main` triggers `.github/workflows/deploy.yml`, which installs with a frozen lockfile, runs `pnpm build` and publishes `dist/` to GitHub Pages. `pnpm build` is `tsc -b && vite build`, so a type error fails the deploy rather than shipping a broken bundle.
+
+The repo is named `shre111.github.io` because that is what GitHub requires to serve a user site at the root — any other name would put it on a subpath.
+
+`vite.config.ts` sets `base: './'`, so the build is path-independent and would work from a subpath too. If the site ever moves, the `canonical` link and the JSON-LD `url` in `index.html` are the two things to update.
 
 ## Stack
 
